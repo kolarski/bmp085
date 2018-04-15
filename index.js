@@ -29,61 +29,7 @@ module.exports = function BMP085(options, callback) {
   function toU16(high, low) {
     return (high << 8) + low;
   }
-
-  sensor.calibrate = function (callback) {
-    wire.readBytes(0xAA, 22, function (err, data) {
-      if (err) {
-        return callback('Error calibrating.');
-      }
-      cal = {
-        ac1: toS16(data[0], data[1]),
-        ac2: toS16(data[2], data[3]),
-        ac3: toS16(data[4], data[5]), 
-        ac4: toU16(data[6], data[7]),
-        ac5: toU16(data[8], data[9]),
-        ac6: toU16(data[10], data[11]),
-        b1:  toS16(data[12], data[13]),
-        b2:  toS16(data[14], data[15]),
-        mb:  toS16(data[16], data[17]),
-        mc:  toS16(data[18], data[19]),
-        md:  toS16(data[20], data[21])
-      };
-      return callback(err, null);
-    });
-  };
-
-  sensor.read = function (call) {
-    async.waterfall([
-      function (callback) {
-        // Write select pressure command to control register
-        wire.writeBytes(BMP085_CONTROL_REGISTER,
-                        [BMP085_SELECT_PRESSURE + (options.mode << 6)]);
-        setTimeout(function () { 
-          callback(null); }, 28);
-      },
-      function (callback) {
-        // Read uncalibrated pressure.
-        wire.readBytes(BMP085_CONVERSION_RESULT, 3, function (err, data) {
-          callback(null, ((data[0] << 16) + (data[1] << 8) + data[2]) 
-                   >> (8 - options.mode));
-        });
-      },
-      function (pressure, callback) {
-        wire.writeBytes(BMP085_CONTROL_REGISTER, [BMP085_SELECT_TEMP]);
-        setTimeout(function () { 
-          callback(null, pressure); }, 8);
-      },
-      function (pressure, callback) {
-        wire.readBytes(BMP085_CONVERSION_RESULT, 2, function (err, data) {
-          callback(null, [pressure, toU16(data[0], data[1])]);
-        });
-      }
-    ], function (err, res) {
-      if (err)
-        call(err, {});
-      var uncal_pressure = res[0];
-      var uncal_temp = res[1];
-
+  function getCalibratedData(uncal_pressure, uncal_temp) {
       // Get calibrated temp
       var x1 = 0;
       var x2 = 0;
@@ -142,13 +88,65 @@ module.exports = function BMP085(options, callback) {
       if (options.units !== 'metric')
         p /= 3386.0;
 
-      call(err, {pressure: p,
-                 temperature: corrected_temp});
+    return {
+      pressure: p,
+      temperature: corrected_temp
+    };
+  }
+  sensor.calibrate = function (callback) {
+    wire.readBytes(0xAA, 22, function (err, data) {
+      if (err) {
+        return callback('Error calibrating.');
+      }
+      cal = {
+        ac1: toS16(data[0], data[1]),
+        ac2: toS16(data[2], data[3]),
+        ac3: toS16(data[4], data[5]), 
+        ac4: toU16(data[6], data[7]),
+        ac5: toU16(data[8], data[9]),
+        ac6: toU16(data[10], data[11]),
+        b1:  toS16(data[12], data[13]),
+        b2:  toS16(data[14], data[15]),
+        mb:  toS16(data[16], data[17]),
+        mc:  toS16(data[18], data[19]),
+        md:  toS16(data[20], data[21])
+      };
+      return callback(err, null);
+    });
+  };
+
+  sensor.read = function (call) {
+    async.waterfall([
+      function (callback) {
+        // Write select pressure command to control register
+        wire.writeBytes(BMP085_CONTROL_REGISTER, [BMP085_SELECT_PRESSURE + (options.mode << 6)], function (err) {
+          setTimeout(function () { callback(err); }, 28);
+        });
+      },
+      function (callback) {
+        // Read uncalibrated pressure.
+        wire.readBytes(BMP085_CONVERSION_RESULT, 3, function (err, data) {
+          const pressure = ((data[0] << 16) + (data[1] << 8) + data[2]) >> (8 - options.mode);
+          callback(null, pressure);
+        });
+      },
+      function (pressure, callback) {
+        wire.writeBytes(BMP085_CONTROL_REGISTER, [BMP085_SELECT_TEMP], function (err) {
+          setTimeout(function () { callback(err, pressure); }, 8);
+        });
+      },
+      function (pressure, callback) {
+        wire.readBytes(BMP085_CONVERSION_RESULT, 2, function (err, data) {
+          callback(null, [pressure, toU16(data[0], data[1])]);
+        });
+      }
+    ], function (err, res) {
+      call(err, getCalibratedData(res[0], res[1]));
     });
   };
 
   return sensor.calibrate(function (err, data) {
-    console.log('Calibration completed !');
+    console.log('Calibration completed!');
     return callback(err, sensor);
   });
 };
