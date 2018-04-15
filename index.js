@@ -1,7 +1,7 @@
 var async = require('async');
 var i2c = require('i2c');
 
-module.exports = function BMP085(options) {
+module.exports = function BMP085(options, callback) {
   var sensor = function() {};
   var wire = new i2c(options.address);
   var cal = {};
@@ -30,11 +30,10 @@ module.exports = function BMP085(options) {
     return (high << 8) + low;
   }
 
-  sensor.calibrate = function () {
+  sensor.calibrate = function (callback) {
     wire.readBytes(0xAA, 22, function (err, data) {
       if (err) {
-        console.error('Error calibrating.');
-        return;
+        return callback('Error calibrating.');
       }
       cal = {
         ac1: toS16(data[0], data[1]),
@@ -49,6 +48,7 @@ module.exports = function BMP085(options) {
         mc:  toS16(data[18], data[19]),
         md:  toS16(data[20], data[21])
       };
+      return callback(err, null);
     });
   };
 
@@ -147,7 +147,8 @@ module.exports = function BMP085(options) {
     });
   };
 
-  sensor.calibrate();
-
-  return sensor;
+  return sensor.calibrate(function (err, data) {
+    console.log('Calibration completed !');
+    return callback(err, sensor);
+  });
 };
